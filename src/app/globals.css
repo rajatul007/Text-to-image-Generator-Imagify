@@ -1,0 +1,191 @@
+@import "tailwindcss";
+@import "@fontsource-variable/bricolage-grotesque";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Tokens ─────────────────────────────────────────────── */
+:root,
+.dark {
+  --ink: #0e0c1f;
+  --panel: #161430;
+  --panel-2: #1e1b3b;
+  --line: #2c2850;
+  --text: #eeecf8;
+  --muted: #a19dc2;
+  --faint: #6f6a95;
+  --violet: #9a7bff;
+  --blue: #4f8cff;
+  --ok: #3dd68c;
+  --warn: #ffb547;
+  --danger: #ff6b81;
+  --on-accent: #ffffff;
+  --glass: rgba(30, 27, 59, 0.55);
+  --shadow: 0 18px 50px -20px rgba(5, 3, 20, 0.8);
+  color-scheme: dark;
+}
+.light {
+  --ink: #f6f5fb;
+  --panel: #ffffff;
+  --panel-2: #f0eef9;
+  --line: #e2dff0;
+  --text: #17152e;
+  --muted: #5f5a80;
+  --faint: #8d88ad;
+  --violet: #6d4aff;
+  --blue: #2f6bff;
+  --ok: #129a5a;
+  --warn: #b7700a;
+  --danger: #d6334f;
+  --on-accent: #ffffff;
+  --glass: rgba(255, 255, 255, 0.7);
+  --shadow: 0 18px 40px -24px rgba(40, 30, 90, 0.35);
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-violet: var(--violet);
+  --color-blue: var(--blue);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-on-accent: var(--on-accent);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-display: "Bricolage Grotesque Variable", var(--font-geist-sans), sans-serif;
+  --radius-field: 0.75rem;
+  --radius-panel: 1.125rem;
+}
+
+/* ── Base ───────────────────────────────────────────────── */
+html,
+body {
+  background: var(--ink);
+  color: var(--text);
+}
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+::selection {
+  background: color-mix(in srgb, var(--violet) 40%, transparent);
+}
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.02em;
+}
+
+/* The one signature gradient: violet → blue, used for primary actions and the prompt console. */
+.spectrum {
+  background-image: linear-gradient(100deg, var(--violet), var(--blue));
+}
+.spectrum-text {
+  background-image: linear-gradient(100deg, var(--violet), var(--blue));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+/* Prompt console: gradient hairline border that sweeps once on load. */
+.console {
+  position: relative;
+  border-radius: 1.5rem;
+  background: var(--panel);
+  isolation: isolate;
+}
+.console::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from var(--sweep, 200deg), var(--line) 0deg, var(--violet) 60deg, var(--blue) 120deg, var(--line) 200deg, var(--line) 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  z-index: -1;
+  animation: sweep 2.4s cubic-bezier(0.6, 0, 0.2, 1) 0.2s 1 both;
+}
+.console:focus-within::before {
+  background: linear-gradient(100deg, var(--violet), var(--blue));
+}
+@property --sweep {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 200deg;
+}
+@keyframes sweep {
+  from {
+    --sweep: -160deg;
+  }
+  to {
+    --sweep: 200deg;
+  }
+}
+
+/* Honest indeterminate progress (no fabricated percentages). */
+.indeterminate {
+  position: relative;
+  overflow: hidden;
+}
+.indeterminate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--violet), var(--blue), transparent);
+  animation: slide 1.4s ease-in-out infinite;
+}
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(260%);
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--panel-2) 25%, color-mix(in srgb, var(--panel-2) 60%, var(--line)) 50%, var(--panel-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

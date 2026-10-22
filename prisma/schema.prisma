@@ -1,0 +1,749 @@
+// Text to Image Generator — PostgreSQL schema
+// Large binary assets live in object storage; only metadata + storage keys are stored here.
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum TokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+enum ModelKind {
+  TEXT_TO_IMAGE
+  IMAGE_EDIT
+  VARIATION
+  UPSCALE
+  REMOVE_BACKGROUND
+}
+
+enum JobType {
+  GENERATE
+  VARIATION
+  EDIT
+  UPSCALE
+  REMOVE_BACKGROUND
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  UPLOADING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ImageOrigin {
+  GENERATED
+  UPLOADED
+  EDITED
+}
+
+enum Visibility {
+  PRIVATE
+  PUBLIC
+}
+
+enum ModerationStatus {
+  OK
+  HIDDEN
+  REMOVED
+}
+
+enum InteractionType {
+  LIKE
+}
+
+enum PromptStatus {
+  PUBLISHED
+  PENDING
+  ARCHIVED
+}
+
+enum CreditTxType {
+  PURCHASE
+  GENERATION_CHARGE
+  REFUND
+  WELCOME_BONUS
+  PROMOTIONAL
+  SUBSCRIPTION_ALLOCATION
+  ADMIN_ADJUSTMENT
+  PAYMENT_REVERSAL
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum SubscriptionStatus {
+  CREATED
+  AUTHENTICATED
+  ACTIVE
+  PENDING
+  HALTED
+  CANCELLED
+  COMPLETED
+  EXPIRED
+}
+
+enum ReportReason {
+  SEXUAL_CONTENT
+  VIOLENCE
+  HATE
+  HARASSMENT
+  COPYRIGHT
+  SPAM
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+enum EmailStatus {
+  SENT
+  FAILED
+  SKIPPED
+}
+
+// ───────────────────────────── Identity ─────────────────────────────
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  name          String
+  role          Role       @default(USER)
+  status        UserStatus @default(ACTIVE)
+  suspendedAt   DateTime?
+  suspendReason String?
+  lastLoginAt   DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  profile            Profile?
+  accounts           Account[]
+  sessions           Session[]
+  tokens             VerificationToken[]
+  wallet             CreditWallet?
+  creditTransactions CreditTransaction[]   @relation("LedgerUser")
+  adminAdjustments   CreditTransaction[]   @relation("LedgerAdmin")
+  jobs               GenerationJob[]
+  images             GeneratedImage[]
+  favorites          Favorite[]
+  promptFavorites    PromptFavorite[]
+  interactions       ImageInteraction[]
+  shareLinks         ShareLink[]
+  paymentOrders      PaymentOrder[]
+  subscriptions      Subscription[]
+  notifications      Notification[]
+  reportsFiled       ContentReport[]       @relation("Reporter")
+  reportsResolved    ContentReport[]       @relation("Resolver")
+  auditLogs          AdminAuditLog[]
+  promptTemplates    PromptTemplate[]
+  enhancements       PromptEnhancement[]
+
+  @@index([createdAt])
+  @@index([status])
+}
+
+model Profile {
+  id          String  @id @default(cuid())
+  userId      String  @unique
+  username    String  @unique
+  displayName String
+  bio         String?
+  avatarKey   String?
+  // Notification preferences (nonessential notifications can be disabled)
+  emailGenerationComplete Boolean @default(false)
+  emailGenerationFailed   Boolean @default(true)
+  emailLowCredits         Boolean @default(true)
+  emailPayments           Boolean @default(true)
+  emailProductUpdates     Boolean @default(false)
+  inAppNotifications      Boolean @default(true)
+  // Defaults applied when an image is made public
+  defaultShowPrompt  Boolean @default(true)
+  defaultShowCreator Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  expiresAt  DateTime
+  ip         String?
+  userAgent  String?
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model VerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  type      TokenType
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+// ───────────────────────────── AI models & generation ─────────────────────────────
+
+model AiModel {
+  id                    String    @id // slug, e.g. "stability-core"
+  provider              String // stability | openai | replicate | clipdrop
+  kind                  ModelKind
+  displayName           String
+  description           String?
+  providerModel         String // provider-side model identifier
+  modelVersion          String // version label stored with every generation
+  enabled               Boolean   @default(true)
+  supportsSeed          Boolean   @default(false)
+  supportsNegativePrompt Boolean  @default(false)
+  supportsStylePreset   Boolean   @default(false)
+  maxImages             Int       @default(1)
+  aspectRatios          String[]
+  qualities             String[]  @default(["standard"])
+  creditsPerImage       Int
+  hdMultiplier          Int       @default(2)
+  estimatedCostUsd      Decimal   @default(0) @db.Decimal(10, 4)
+  sortOrder             Int       @default(0)
+  config                Json      @default("{}")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  jobs GenerationJob[]
+}
+
+model GenerationJob {
+  id             String    @id @default(cuid())
+  userId         String
+  type           JobType
+  status         JobStatus @default(QUEUED)
+  modelId        String
+  provider       String
+  modelVersion   String
+  prompt         String // what the user typed (or the edit instruction)
+  enhancedPrompt String? // enhanced version, if the user applied one
+  finalPrompt    String // exact prompt sent to the provider (with style modifiers)
+  negativePrompt String?
+  style          String?
+  aspectRatio    String?
+  quality        String    @default("standard")
+  width          Int?
+  height         Int?
+  numImages      Int       @default(1)
+  seed           Int? // seed requested (null => random chosen server-side when supported)
+  params         Json      @default("{}")
+  sourceImageId  String?
+  creditsCharged Int
+  idempotencyKey String
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(3)
+  nextRunAt      DateTime  @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?
+  errorCode      String?
+  errorMessage   String?
+  providerCostUsd Decimal? @db.Decimal(10, 4)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  cancelledAt    DateTime?
+  retryOfId      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  model       AiModel          @relation(fields: [modelId], references: [id])
+  sourceImage GeneratedImage?  @relation("JobSource", fields: [sourceImageId], references: [id], onDelete: SetNull)
+  images      GeneratedImage[] @relation("JobImages")
+
+  @@unique([userId, idempotencyKey])
+  @@index([status, nextRunAt])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model GeneratedImage {
+  id               String           @id @default(cuid())
+  userId           String
+  jobId            String?
+  parentId         String?
+  origin           ImageOrigin      @default(GENERATED)
+  storageKey       String
+  thumbKey         String?
+  mimeType         String
+  width            Int
+  height           Int
+  bytes            Int
+  seed             Int?
+  prompt           String? // denormalised for search
+  style            String?
+  modelId          String?
+  visibility       Visibility       @default(PRIVATE)
+  showPrompt       Boolean          @default(true)
+  showCreator      Boolean          @default(true)
+  publishedAt      DateTime?
+  moderationStatus ModerationStatus @default(OK)
+  likeCount        Int              @default(0)
+  viewCount        Int              @default(0)
+  deletedAt        DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job          GenerationJob?     @relation("JobImages", fields: [jobId], references: [id], onDelete: SetNull)
+  parent       GeneratedImage?    @relation("ImageParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children     GeneratedImage[]   @relation("ImageParent")
+  sourceForJobs GenerationJob[]   @relation("JobSource")
+  version      ImageVersion?      @relation("VersionImage")
+  rootVersions ImageVersion[]     @relation("VersionRoot")
+  favorites    Favorite[]
+  interactions ImageInteraction[]
+  shareLinks   ShareLink[]
+  reports      ContentReport[]
+
+  @@index([userId, createdAt])
+  @@index([visibility, moderationStatus, publishedAt])
+  @@index([visibility, likeCount])
+  @@index([jobId])
+  @@index([parentId])
+}
+
+model ImageVersion {
+  id            String   @id @default(cuid())
+  imageId       String   @unique
+  rootImageId   String
+  parentImageId String?
+  versionNumber Int
+  operation     JobType
+  instruction   String?
+  createdAt     DateTime @default(now())
+
+  image GeneratedImage @relation("VersionImage", fields: [imageId], references: [id], onDelete: Cascade)
+  root  GeneratedImage @relation("VersionRoot", fields: [rootImageId], references: [id], onDelete: Cascade)
+
+  @@index([rootImageId, versionNumber])
+}
+
+model PromptEnhancement {
+  id        String   @id @default(cuid())
+  userId    String
+  original  String
+  mode      String
+  results   String[]
+  provider  String
+  model     String
+  applied   String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// ───────────────────────────── Prompt library ─────────────────────────────
+
+model PromptTemplate {
+  id              String       @id @default(cuid())
+  title           String
+  prompt          String
+  negativePrompt  String?
+  category        String
+  style           String
+  aspectRatio     String       @default("1:1")
+  previewImageUrl String?
+  tags            String[]
+  featured        Boolean      @default(false)
+  usageCount      Int          @default(0)
+  status          PromptStatus @default(PUBLISHED)
+  isPublic        Boolean      @default(true)
+  authorId        String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  author    User?            @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  favorites PromptFavorite[]
+
+  @@index([category])
+  @@index([featured])
+  @@index([usageCount])
+  @@index([createdAt])
+}
+
+model PromptFavorite {
+  id         String   @id @default(cuid())
+  userId     String
+  templateId String
+  createdAt  DateTime @default(now())
+
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template PromptTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, templateId])
+}
+
+// ───────────────────────────── Collections & community ─────────────────────────────
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  imageId   String
+  createdAt DateTime @default(now())
+
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  image GeneratedImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, imageId])
+  @@index([userId, createdAt])
+}
+
+model ImageInteraction {
+  id        String          @id @default(cuid())
+  userId    String
+  imageId   String
+  type      InteractionType
+  createdAt DateTime        @default(now())
+
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  image GeneratedImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, imageId, type])
+  @@index([imageId, type])
+}
+
+model ShareLink {
+  id          String    @id @default(cuid())
+  token       String    @unique
+  imageId     String
+  userId      String
+  showPrompt  Boolean   @default(true)
+  showCreator Boolean   @default(true)
+  viewCount   Int       @default(0)
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  image GeneratedImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([imageId])
+}
+
+model ContentReport {
+  id           String       @id @default(cuid())
+  imageId      String
+  reporterId   String?
+  reason       ReportReason
+  details      String?
+  status       ReportStatus @default(OPEN)
+  resolvedById String?
+  resolution   String?
+  resolvedAt   DateTime?
+  createdAt    DateTime     @default(now())
+
+  image      GeneratedImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  reporter   User?          @relation("Reporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  resolvedBy User?          @relation("Resolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@unique([imageId, reporterId])
+  @@index([status, createdAt])
+}
+
+// ───────────────────────────── Credits ─────────────────────────────
+
+model CreditWallet {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  balance           Int      @default(0) // CHECK (balance >= 0) added in migration
+  lifetimePurchased Int      @default(0)
+  lifetimePromo     Int      @default(0)
+  lifetimeSpent     Int      @default(0)
+  lifetimeRefunded  Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions CreditTransaction[]
+}
+
+/// Immutable ledger: UPDATE/DELETE are rejected by a database trigger (see migration).
+model CreditTransaction {
+  id             String       @id @default(cuid())
+  walletId       String
+  userId         String
+  type           CreditTxType
+  amount         Int // signed: positive adds credits, negative deducts
+  balanceAfter   Int
+  idempotencyKey String       @unique
+  description    String
+  reason         String?
+  jobId          String?
+  paymentOrderId String?
+  subscriptionId String?
+  adminId        String?
+  metadata       Json         @default("{}")
+  createdAt      DateTime     @default(now())
+
+  wallet       CreditWallet  @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  user         User          @relation("LedgerUser", fields: [userId], references: [id], onDelete: Restrict)
+  admin        User?         @relation("LedgerAdmin", fields: [adminId], references: [id], onDelete: Restrict)
+  paymentOrder PaymentOrder? @relation(fields: [paymentOrderId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
+  @@index([jobId])
+}
+
+model CreditPackage {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  credits     Int
+  pricePaise  Int
+  currency    String   @default("INR")
+  active      Boolean  @default(true)
+  highlight   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders PaymentOrder[]
+}
+
+// ───────────────────────────── Payments & subscriptions ─────────────────────────────
+
+model PaymentOrder {
+  id                  String        @id @default(cuid())
+  userId              String
+  packageId           String?
+  receipt             String        @unique
+  razorpayOrderId     String?       @unique
+  razorpayPaymentId   String?       @unique
+  amountPaise         Int
+  currency            String        @default("INR")
+  credits             Int
+  packageName         String
+  status              PaymentStatus @default(CREATED)
+  method              String?
+  failureReason       String?
+  signatureVerifiedAt DateTime?
+  paidAt              DateTime?
+  fulfilledAt         DateTime?
+  refundedPaise       Int           @default(0)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  package      CreditPackage?      @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  transactions CreditTransaction[]
+  refunds      PaymentRefund[]
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model PaymentRefund {
+  id               String   @id @default(cuid())
+  orderId          String
+  razorpayRefundId String   @unique
+  amountPaise      Int
+  status           String
+  creditsReversed  Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  order PaymentOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+}
+
+model PaymentWebhookEvent {
+  id             String        @id @default(cuid())
+  eventId        String        @unique
+  event          String
+  signatureValid Boolean
+  status         WebhookStatus @default(RECEIVED)
+  payload        Json
+  error          String?
+  processedAt    DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([status, createdAt])
+}
+
+model SubscriptionPlan {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  name           String
+  description    String?
+  monthlyCredits Int
+  pricePaise     Int
+  razorpayPlanId String?
+  features       String[]
+  active         Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                     String             @id @default(cuid())
+  userId                 String
+  planId                 String
+  razorpaySubscriptionId String             @unique
+  status                 SubscriptionStatus @default(CREATED)
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean            @default(false)
+  pendingPlanId          String?
+  lastPaymentFailedAt    DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  user User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  plan SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@index([userId, status])
+}
+
+// ───────────────────────────── Platform ─────────────────────────────
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+}
+
+model AdminAuditLog {
+  id         String   @id @default(cuid())
+  adminId    String
+  action     String
+  targetType String
+  targetId   String?
+  details    Json     @default("{}")
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  admin User @relation(fields: [adminId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([targetType, targetId])
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model Announcement {
+  id        String    @id @default(cuid())
+  title     String
+  body      String
+  level     String    @default("info")
+  active    Boolean   @default(true)
+  startsAt  DateTime  @default(now())
+  endsAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model ErrorLog {
+  id        String   @id @default(cuid())
+  level     String
+  source    String
+  message   String
+  context   Json     @default("{}")
+  userId    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([source])
+}
+
+model EmailLog {
+  id        String      @id @default(cuid())
+  to        String
+  template  String
+  subject   String
+  provider  String
+  status    EmailStatus
+  error     String?
+  /// Only populated when EMAIL_PROVIDER=console (local development) so links can be read without an inbox.
+  devBody   String?
+  createdAt DateTime    @default(now())
+
+  @@index([to, createdAt])
+}
