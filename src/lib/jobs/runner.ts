@@ -18,7 +18,7 @@ export function dispatchJob(jobId: string) {
   try {
     after(() => run().catch((err) => logger.error("inline job failed", { jobId, error: (err as Error).message })));
   } catch {
-    // Not inside a request scope (e.g. scripts/tests) – run detached.
+    // Not inside a request scope – run detached.
     dispatchDetached(jobId);
   }
 }
