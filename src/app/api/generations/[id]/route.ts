@@ -21,3 +21,6 @@ export const GET = route({}, async ({ user, params }) => {
   }
   return { job: serializeJob(job) };
 });
+
+// Generation work continues after the response (after()); allow time for slow providers on serverless hosts.
+export const maxDuration = 300;

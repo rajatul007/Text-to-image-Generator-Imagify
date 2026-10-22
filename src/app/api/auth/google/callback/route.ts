@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { exchangeGoogleCode, googleConfigured } from "@/lib/auth/google";
-import { createUser, grantWelcomeBonus, normalizeEmail } from "@/lib/auth/accounts";
+import { createUser, grantWelcomeBonus, normalizeEmail, promoteConfiguredAdmin } from "@/lib/auth/accounts";
 import { createSession } from "@/lib/auth/session";
 import { safeEqual } from "@/lib/crypto";
 import { recordError } from "@/lib/logger";
@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
       await grantWelcomeBonus(user.id);
     }
     if (user.status === "SUSPENDED") return fail("suspended");
+    await promoteConfiguredAdmin(user.id);
     if (user.status === "DELETED") return fail("google_state");
     await createSession(user.id);
     const next = req.cookies.get("pf_oauth_next")?.value;

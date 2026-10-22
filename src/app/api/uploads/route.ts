@@ -8,7 +8,9 @@ import { imageUrls } from "@/lib/images/access";
 
 /** Upload a source image for editing. Files are decoded and re-encoded server-side; private by default. */
 export const POST = route({ verified: true, rateLimit: RULES.upload }, async ({ user, req }) => {
-  const { maxUploadMb } = await getSettings();
+  const settings = await getSettings();
+  // Vercel functions reject request bodies above 4.5 MB.
+  const maxUploadMb = process.env.VERCEL ? Math.min(settings.maxUploadMb, 4) : settings.maxUploadMb;
   const len = Number(req.headers.get("content-length") ?? 0);
   if (len > (maxUploadMb + 1) * 1024 * 1024) throw new AppError("PAYLOAD_TOO_LARGE", `Image must be smaller than ${maxUploadMb} MB`);
   const form = await req.formData().catch(() => null);

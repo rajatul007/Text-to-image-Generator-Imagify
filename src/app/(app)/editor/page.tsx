@@ -16,7 +16,7 @@ export default async function EditorIndex() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader title="Image Editor" description="Edit with text, create variations, upscale, or remove backgrounds – then compare before and after." />
-      <EditorPicker recent={recent.map((r) => ({ id: r.id, prompt: r.prompt, thumbUrl: imageUrls(r.id).thumbUrl }))} maxMb={settings.maxUploadMb} verified={Boolean(user.emailVerified)} />
+      <EditorPicker recent={recent.map((r) => ({ id: r.id, prompt: r.prompt, thumbUrl: imageUrls(r.id).thumbUrl }))} maxMb={process.env.VERCEL ? Math.min(settings.maxUploadMb, 4) : settings.maxUploadMb} verified={Boolean(user.emailVerified)} />
     </div>
   );
 }

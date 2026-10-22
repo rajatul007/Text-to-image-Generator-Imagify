@@ -1,4 +1,8 @@
 import type { NextConfig } from "next";
+import { bootstrapEnv } from "./src/lib/bootstrap-env";
+
+// Runs in the server process at build and start: blank env values → unset, APP_URL host fallback.
+bootstrapEnv();
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },

@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { bootstrapEnv } from "./bootstrap-env";
+
+bootstrapEnv();
 
 const bool = z
   .string()
@@ -37,7 +40,7 @@ const schema = z.object({
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
   RAZORPAY_API_BASE: z.string().url().default("https://api.razorpay.com/v1"),
   // Storage
-  STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
+  STORAGE_DRIVER: z.enum(["local", "s3", "vercel-blob"]).default("local"),
   LOCAL_STORAGE_DIR: z.string().default("./storage"),
   S3_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default("auto"),
@@ -58,6 +61,8 @@ const schema = z.object({
   REDIS_URL: z.string().optional(),
   JOB_RUNNER: z.enum(["inline", "worker"]).default("inline"),
   SUPPORT_EMAIL: z.string().default("support@example.com"),
+  // Comma-separated emails that become administrators once they verify their address (bootstrap for hosted deploys).
+  ADMIN_EMAILS: z.string().optional(),
 });
 
 export type Env = z.infer<typeof schema>;
@@ -66,13 +71,16 @@ let cached: Env | null = null;
 
 export function env(): Env {
   if (cached) return cached;
+  bootstrapEnv();
   const parsed = schema.safeParse(process.env);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n");
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
   if (parsed.data.NODE_ENV === "production") {
-    if (parsed.data.STORAGE_DRIVER === "local")
+    if (parsed.data.STORAGE_DRIVER === "local" && process.env.VERCEL && !process.env.BLOB_READ_WRITE_TOKEN)
+      console.error("[storage] Running on Vercel without a Blob store – generated images cannot be saved. Add Storage → Blob in the Vercel dashboard.");
+    else if (parsed.data.STORAGE_DRIVER === "local" && !process.env.VERCEL)
       console.warn("[pixelforge] STORAGE_DRIVER=local in production – use S3-compatible storage for multi-instance deployments.");
     if (parsed.data.EMAIL_PROVIDER === "console")
       console.warn("[pixelforge] EMAIL_PROVIDER=console in production – emails will NOT be delivered.");
@@ -100,6 +108,7 @@ export function integrationStatus() {
     razorpay: Boolean(e.RAZORPAY_KEY_ID && e.RAZORPAY_KEY_SECRET),
     razorpayWebhook: Boolean(e.RAZORPAY_WEBHOOK_SECRET),
     s3: e.STORAGE_DRIVER === "s3" && Boolean(e.S3_BUCKET && e.S3_ACCESS_KEY_ID),
+    vercelBlob: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
     email: e.EMAIL_PROVIDER !== "console",
     redis: Boolean(e.REDIS_URL),
   };

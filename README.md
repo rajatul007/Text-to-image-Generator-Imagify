@@ -246,7 +246,26 @@ Covered: authentication & sessions, CSRF, brute-force limits, email verification
 
 ## Deployment
 
-**Single VM / container (simplest):**
+### Vercel (recommended for this repo)
+
+1. **Import the repo:** [vercel.com/new](https://vercel.com/new) → *Import Git Repository* → `Text-to-image-Generator-Imagify`. Framework is detected as Next.js; keep the defaults. Vercel automatically runs the `vercel-build` script (migrations + seed + build).
+2. **Before the first deploy, add environment variables** (Project → Settings → Environment Variables):
+   - `AUTH_SECRET` – 32+ random characters (`openssl rand -base64 48`)
+   - `ADMIN_EMAILS` – your email; it becomes admin after you sign up and verify it
+   - at least one image provider key, e.g. `STABILITY_API_KEY` or `REPLICATE_API_TOKEN`
+   - optional: `LLM_API_KEY`, `RAZORPAY_*`, `EMAIL_PROVIDER=resend` + `RESEND_API_KEY`, `GOOGLE_CLIENT_*`
+3. **Add a database:** Project → *Storage* → *Create Database* → **Neon (Postgres)** → connect to the project. It sets `DATABASE_URL` (and an unpooled URL used for migrations).
+4. **Add image storage:** Project → *Storage* → **Blob** → create and connect. It sets `BLOB_READ_WRITE_TOKEN`; images are stored as **private** blobs and served only through the app's access checks.
+5. **Deploy** (Deployments → Redeploy if the first build ran before the database existed).
+6. `APP_URL` is detected from your production domain automatically; set it explicitly if you add a custom domain.
+
+Notes for Vercel: generation runs in the background of the request (`after()`, up to 300 s per request); retries and stalled jobs are resumed automatically while the page polls for status. Uploads are capped at 4 MB (Vercel's request limit). Without `EMAIL_PROVIDER=resend`, verification links appear in *Deployments → Logs*. For heavy traffic, run `npm run worker` on an always-on host with `JOB_RUNNER=worker`. Rate limits are per-instance unless you add Redis (e.g. Upstash, `REDIS_URL`).
+
+### Render (alternative)
+
+`render.yaml` defines a one-click Blueprint (web app + Postgres + disk): [render.com/deploy?repo=https://github.com/rajatul007/Text-to-image-Generator-Imagify](https://render.com/deploy?repo=https://github.com/rajatul007/Text-to-image-Generator-Imagify).
+
+### Single VM / container
 
 ```bash
 npm ci && npm run build && npm run db:deploy && npm run db:seed
@@ -255,8 +274,6 @@ JOB_RUNNER=worker npm run worker &  # worker (use systemd/PM2/supervisor in prac
 ```
 
 Put it behind HTTPS (Caddy/nginx) and set `APP_URL=https://…` (session cookies become `__Host-` + `Secure`). Use S3-compatible storage, Redis, and a transactional email provider.
-
-**Vercel / serverless:** set all env vars, `JOB_RUNNER=worker`, `STORAGE_DRIVER=s3`, `REDIS_URL`, and run `npm run worker` on a small always-on host (Railway, Fly.io, Render, a VM). Use a pooled Postgres URL (Neon, Supabase, RDS Proxy).
 
 **Docker:** a standard Node 20+ image running `npm ci && npm run build`, then `npm start` / `npm run worker` as two services sharing the same env.
 

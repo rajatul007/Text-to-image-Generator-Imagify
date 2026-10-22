@@ -95,5 +95,22 @@ export async function grantWelcomeBonus(userId: string) {
 
 export async function markEmailVerified(userId: string) {
   await db.user.updateMany({ where: { id: userId, emailVerified: null }, data: { emailVerified: new Date() } });
+  await promoteConfiguredAdmin(userId);
   await grantWelcomeBonus(userId);
+}
+
+/**
+ * Bootstrap for hosted deployments without shell access: a VERIFIED account whose email is listed in the
+ * server-side ADMIN_EMAILS variable becomes an administrator. Signup input can never set roles.
+ */
+export async function promoteConfiguredAdmin(userId: string) {
+  const list = (env().ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((e) => normalizeEmail(e))
+    .filter(Boolean);
+  if (list.length === 0) return;
+  const user = await db.user.findUnique({ where: { id: userId } });
+  if (user?.emailVerified && user.status === "ACTIVE" && user.role !== "ADMIN" && list.includes(user.email)) {
+    await db.user.update({ where: { id: userId }, data: { role: "ADMIN" } });
+  }
 }

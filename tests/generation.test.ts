@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { POST as createGen, GET as listGen } from "@/app/api/generations/route";
 import { GET as getGen } from "@/app/api/generations/[id]/route";
@@ -139,8 +139,8 @@ describe("generation jobs", () => {
     await failJob(job, "x", "again");
     expect(await db.creditTransaction.count({ where: { jobId: id, type: "REFUND" } })).toBe(1);
     expect(await balanceOf(user.id)).toBe(20);
-    const notification = await db.notification.findFirst({ where: { userId: user.id, type: "GENERATION_FAILED" } });
-    expect(notification).not.toBeNull();
+    // notifications are sent asynchronously (fire-and-forget)
+    await vi.waitFor(async () => expect(await db.notification.findFirst({ where: { userId: user.id, type: "GENERATION_FAILED" } })).not.toBeNull(), { timeout: 5000 });
   });
 
   it("does not retry content-filter rejections", async () => {

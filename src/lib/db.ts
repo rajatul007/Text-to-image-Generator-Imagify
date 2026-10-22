@@ -1,5 +1,8 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { bootstrapEnv } from "./bootstrap-env";
+
+bootstrapEnv();
 
 // Rust-free Prisma Client (engineType = "client") running on the `pg` driver adapter.
 function createClient() {

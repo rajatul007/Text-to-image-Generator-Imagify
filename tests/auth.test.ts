@@ -113,3 +113,27 @@ describe("authentication", () => {
     expect((await call(adminAnalytics, "/api/admin/analytics", { session: admin.session })).status).toBe(200);
   });
 });
+
+describe("admin bootstrap via ADMIN_EMAILS", () => {
+  beforeEach(resetDb);
+  it("promotes only a verified account whose email is configured server-side", async () => {
+    const { resetEnvCache } = await import("@/lib/env");
+    process.env.ADMIN_EMAILS = "Boss@Example.com, other@example.com";
+    resetEnvCache();
+    try {
+      await call(signup, "/api/auth/signup", { body: { name: "Boss", email: "boss@example.com", password: "secret123" }, headers: { "x-forwarded-for": "10.9.9.1" } });
+      const user = await db.user.findUniqueOrThrow({ where: { email: "boss@example.com" } });
+      expect(user.role).toBe("USER"); // not before verification
+      const token = await lastEmailToken("boss@example.com", "verifyEmail");
+      await call(verifyEmail, "/api/auth/verify-email", { body: { token }, headers: { "x-forwarded-for": "10.9.9.3" } });
+      expect((await db.user.findUniqueOrThrow({ where: { id: user.id } })).role).toBe("ADMIN");
+      await call(signup, "/api/auth/signup", { body: { name: "Rando", email: "rando@example.com", password: "secret123" }, headers: { "x-forwarded-for": "10.9.9.2" } });
+      const t2 = await lastEmailToken("rando@example.com", "verifyEmail");
+      await call(verifyEmail, "/api/auth/verify-email", { body: { token: t2 }, headers: { "x-forwarded-for": "10.9.9.4" } });
+      expect((await db.user.findUniqueOrThrow({ where: { email: "rando@example.com" } })).role).toBe("USER");
+    } finally {
+      delete process.env.ADMIN_EMAILS;
+      resetEnvCache();
+    }
+  });
+});

@@ -9,3 +9,6 @@ export const POST = route({ verified: true, rateLimit: RULES.generate }, async (
   const { job, duplicate } = await createEditJob(user.id, input);
   return { job: serializeJob(job), duplicate, balance: await getBalance(user.id) };
 });
+
+// Generation work continues after the response (after()); allow time for slow providers on serverless hosts.
+export const maxDuration = 300;
